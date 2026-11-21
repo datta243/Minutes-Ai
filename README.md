@@ -16,14 +16,6 @@ The application combines a React frontend, FastAPI backend, and AI inference run
 - 📊 **Progress Tracking** — Track the processing status of submitted jobs.
 - 🧩 **Structured Output** — Parse model-generated content into separate fields for display.
 
-## Demo
-
-<!-- Add your project screenshot or demo video here -->
-
-<!-- Example:
-![MinutesAI Demo](screenshots/minutesai-demo.png)
--->
-
 ## Tech Stack
 
 | Component | Technology |

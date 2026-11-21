@@ -1,0 +1,200 @@
+"""
+Regression test: Denver City Council Meeting — the actual bug case.
+
+The Llama 3.2 3B model outputs valid meeting data but with literal newline
+characters inside the "markdown" field (and sometimes inside "summary").
+json.loads() rejects these with "Invalid control character".
+
+This test reproduces the exact structure of the Denver City Council output
+that caused the UI to display raw JSON as the Executive Summary.
+"""
+import sys
+import os
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
+from app.parse_minutes import parse_minutes
+
+
+# --- Simulate the actual Llama output with literal newlines in strings ---
+# The model writes actual newlines inside the JSON markdown field, NOT \n escapes.
+DENVER_RAW = '''{
+    "title": "Denver City Council Meeting",
+    "date": "October 9, 2017",
+    "location": "Denver City Council Chambers",
+    "attendees": [
+        "Council President Albus Brooks",
+        "Council Member Wayne New",
+        "Council Member Paul Lopez",
+        "Council Member Kevin Flynn",
+        "Council Member Jolon Clark",
+        "Council Member Stacie Gilmore",
+        "Council Member Christopher Herndon",
+        "Council Member Kendra Black",
+        "Council Member Mary Beth Susman",
+        "Council Member Rafael Espinoza"
+    ],
+    "summary": "The Denver City Council held a meeting to proclaim October 9, 2017 as Indigenous Peoples Day in Denver, honoring the contributions and resilience of indigenous peoples throughout history.",
+    "discussion_points": [
+        "Proclamation of Indigenous Peoples Day recognizing the contributions of indigenous peoples",
+        "Historical context of colonization and its impact on Native American communities",
+        "Council members shared personal reflections on the significance of the proclamation",
+        "Acknowledgment of the ongoing struggles faced by indigenous communities",
+        "Recognition of local Native American organizations and leaders"
+    ],
+    "takeaways": [
+        "Denver officially recognizes October 9 as Indigenous Peoples Day",
+        "The proclamation honors indigenous peoples' contributions to society",
+        "Multiple council members expressed personal commitment to indigenous rights",
+        "The city acknowledges the need for continued support of Native American communities"
+    ],
+    "action_items": [
+        {"task": "Formally issue the Indigenous Peoples Day proclamation", "owner": "Council President Albus Brooks", "due_date": "October 9, 2017"},
+        {"task": "Coordinate with local Native American organizations for future events", "owner": "Council staff", "due_date": "Not specified"},
+        {"task": "Review additional ways to support indigenous communities in Denver", "owner": "City Council", "due_date": "Not specified"}
+    ],
+    "markdown": "# Denver City Council Meeting Minutes
+
+## Meeting Details
+- **Date:** October 9, 2017
+- **Location:** Denver City Council Chambers
+- **Presiding:** Council President Albus Brooks
+
+## Attendees
+- Council President Albus Brooks
+- Council Member Wayne New
+- Council Member Paul Lopez
+- Council Member Kevin Flynn
+- Council Member Jolon Clark
+- Council Member Stacie Gilmore
+- Council Member Christopher Herndon
+- Council Member Kendra Black
+- Council Member Mary Beth Susman
+- Council Member Rafael Espinoza
+
+## Proceedings
+
+### Indigenous Peoples Day Proclamation
+
+The Denver City Council convened to officially proclaim October 9, 2017 as Indigenous Peoples Day in the City and County of Denver.
+
+Council President Brooks opened the session by acknowledging the traditional lands of the Arapaho, Cheyenne, and Ute peoples upon which Denver was built.
+
+Council Member Lopez spoke about the historical significance of replacing Columbus Day with Indigenous Peoples Day, noting: "This is about truth-telling and honoring those who were here first."
+
+Council Member Clark shared personal reflections on growing up near Native American communities and the importance of recognizing indigenous contributions to American society.
+
+### Council Statements
+
+Several council members made statements supporting the proclamation:
+
+- **Wayne New:** Emphasized the educational importance of the proclamation
+- **Paul Lopez:** Discussed the historical context of colonization
+- **Kevin Flynn:** Spoke about reconciliation and moving forward
+- **Stacie Gilmore:** Highlighted local Native American organizations
+- **Kendra Black:** Noted the growing national movement for Indigenous Peoples Day
+
+### Vote
+
+The proclamation was adopted unanimously by all council members present.
+
+## Action Items
+1. Formally issue the Indigenous Peoples Day proclamation (Council President Albus Brooks, by October 9, 2017)
+2. Coordinate with local Native American organizations for future events (Council staff)
+3. Review additional ways to support indigenous communities in Denver (City Council)
+
+---
+*Minutes generated by MinutesAI*"
+}'''
+
+
+def test_denver_basic_parsing():
+    """Test that the Denver sample parses all fields correctly."""
+    m = parse_minutes(DENVER_RAW)
+
+    assert m.title == "Denver City Council Meeting", f"title: {m.title}"
+    assert m.date == "October 9, 2017", f"date: {m.date}"
+    assert m.location == "Denver City Council Chambers", f"location: {m.location}"
+    assert len(m.attendees) == 10, f"attendees count: {len(m.attendees)}"
+    assert "Council President Albus Brooks" in m.attendees
+    assert "Council Member Rafael Espinoza" in m.attendees
+    print("  PASS: basic field parsing")
+
+
+def test_denver_summary_not_json():
+    """Test that summary is the actual summary text, not the entire JSON blob."""
+    m = parse_minutes(DENVER_RAW)
+
+    assert m.summary.startswith("The Denver City Council held a meeting"), \
+        f"summary should start with actual text, got: {m.summary[:80]}"
+    assert "{" not in m.summary, "summary must NOT contain JSON braces"
+    assert len(m.summary) < 300, f"summary is too long ({len(m.summary)} chars) — may be the full JSON"
+    print("  PASS: summary is not raw JSON")
+
+
+def test_denver_discussion_points():
+    """Test that discussion_points are parsed from the JSON, not empty."""
+    m = parse_minutes(DENVER_RAW)
+
+    assert len(m.discussion_points) == 5, f"discussion_points count: {len(m.discussion_points)}"
+    assert "Proclamation" in m.discussion_points[0], f"first point: {m.discussion_points[0]}"
+    print("  PASS: discussion_points populated")
+
+
+def test_denver_takeaways():
+    """Test that takeaways are parsed correctly."""
+    m = parse_minutes(DENVER_RAW)
+
+    assert len(m.takeaways) == 4, f"takeaways count: {len(m.takeaways)}"
+    assert "Indigenous Peoples Day" in m.takeaways[0]
+    print("  PASS: takeaways populated")
+
+
+def test_denver_action_items():
+    """Test that action_items are parsed as structured objects."""
+    m = parse_minutes(DENVER_RAW)
+
+    assert len(m.action_items) == 3, f"action_items count: {len(m.action_items)}"
+    assert "proclamation" in m.action_items[0].task.lower()
+    assert "Brooks" in m.action_items[0].owner
+    assert m.action_items[0].due_date == "October 9, 2017"
+    assert m.action_items[1].owner == "Council staff"
+    assert m.action_items[2].owner == "City Council"
+    print("  PASS: action_items structured correctly")
+
+
+def test_denver_markdown_is_report():
+    """Test that the markdown field contains the formatted report, not raw JSON."""
+    m = parse_minutes(DENVER_RAW)
+
+    assert m.markdown.startswith("# Denver City Council"), \
+        f"markdown should start with the heading, got: {m.markdown[:50]}"
+    assert "## Meeting Details" in m.markdown
+    assert "MinutesAI" in m.markdown  # the footer
+    assert m.markdown != DENVER_RAW, "markdown should NOT be the raw JSON input"
+    print("  PASS: markdown contains formatted report")
+
+
+def test_denver_no_silent_failure():
+    """Test that if parsing DOES fail, we get a clear error, not empty arrays."""
+    # Test with intentionally broken JSON (cut off mid-string)
+    broken = DENVER_RAW[:200]  # truncated
+    m = parse_minutes(broken)
+
+    # Either parsing succeeded (unlikely with truncation) or we get the fallback message
+    if m.title == "Meeting Minutes":
+        # Parsing failed — verify we got the fallback message, not empty strings
+        assert "could not be parsed" in m.summary.lower(), \
+            f"Should have fallback message, got: {m.summary}"
+    print("  PASS: no silent failure on broken input")
+
+
+if __name__ == "__main__":
+    print("Running Denver City Council regression tests...\n")
+    test_denver_basic_parsing()
+    test_denver_summary_not_json()
+    test_denver_discussion_points()
+    test_denver_takeaways()
+    test_denver_action_items()
+    test_denver_markdown_is_report()
+    test_denver_no_silent_failure()
+    print(f"\nAll 7 Denver regression tests passed.")
